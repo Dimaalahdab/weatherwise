@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import "./App.css";
 import { getWeather } from "./services/weather";
+import { EMOJIS } from "./data/emojiMap";
 
 /* ── DATA ── */
 
@@ -49,24 +50,29 @@ const RESCHEDULE_ITEMS = [
 
 const SUGGESTIONS = [
   {
-    icon: "🚶",
+    type: "walk",
     text: "Perfect for a walk right now",
     tag: "Now",
     color: "green",
   },
   {
-    icon: "☔",
+    type: "umbrella",
     text: "Umbrella if out after 5 PM",
     tag: "After 5",
     color: "blue",
   },
   {
-    icon: "🧥",
+    type: "jacket",
     text: "Light jacket for this evening",
     tag: "6 PM+",
     color: "violet",
   },
-  { icon: "🌿", text: "Low pollen today", tag: "All day", color: "amber" },
+  {
+    type: "pollen",
+    text: "Low pollen today",
+    tag: "All day",
+    color: "amber",
+  },
 ];
 
 const INSIGHTS = [
@@ -86,47 +92,66 @@ function Toast({ msg, onDone }) {
 
 /* ── WEATHER ── */
 function getWeatherTheme(code) {
-  if (code === 0) return {
-    bg: "linear-gradient(135deg, #FFD700, #FFA500)",  // sunny yellow
-    cardBg: "#FFF9E6",
-    accent: "#F59E0B",
-    emoji: "☀️"
-  };
-  if (code <= 2) return {
-    bg: "linear-gradient(135deg, #87CEEB, #B0C4DE)",  // partly cloudy blue
-    cardBg: "#EFF6FF",
-    accent: "#60A5FA",
-    emoji: "⛅"
-  };
-  if (code === 3) return {
-    bg: "linear-gradient(135deg, #9CA3AF, #6B7280)",  // overcast grey
-    cardBg: "#F3F4F6",
-    accent: "#9CA3AF",
-    emoji: "☁️"
-  };
-  if (code <= 67) return {
-    bg: "linear-gradient(135deg, #4A7FA5, #2C5F7A)",  // rainy dark blue
-    cardBg: "#EFF6FF",
-    accent: "#3B82F6",
-    emoji: "🌧️"
-  };
-  if (code <= 77) return {
-    bg: "linear-gradient(135deg, #E0F2FE, #BAE6FD)",  // snowy light
-    cardBg: "#F0F9FF",
-    accent: "#7DD3FC",
-    emoji: "❄️"
-  };
-  if (code <= 99) return {
-    bg: "linear-gradient(135deg, #1F2937, #374151)",  // stormy dark
-    cardBg: "#1F2937",
-    accent: "#818CF8",
-    emoji: "⛈️"
-  };
+  if (code === 0)
+    return {
+      bg: "linear-gradient(135deg, #FFD700, #FFA500)",
+      accent: "#F59E0B",
+      text: "#1A0F00",
+      condColor: "#F59E0B",
+      type: "sunny",
+    };
+
+  if (code <= 2)
+    return {
+      bg: "linear-gradient(135deg, #87CEEB, #B0C4DE)",
+      accent: "#60A5FA",
+      text: "#1A0F00",
+      condColor: "#5f87c7ff",
+      type: "cloudy",
+    };
+
+  if (code === 3)
+    return {
+      bg: "linear-gradient(135deg, #9CA3AF, #6B7280)",
+      accent: "#9CA3AF",
+      text: "#FFFFFF",
+      condColor: "#D1D5DB",
+      type: "overcast",
+    };
+
+  if (code <= 67)
+    return {
+      bg: "linear-gradient(135deg, #4A7FA5, #2C5F7A)",
+      accent: "#3B82F6",
+      text: "#FFFFFF",
+      condColor: "#60A5FA",
+      type: "rainy",
+    };
+
+  if (code <= 77)
+    return {
+      bg: "linear-gradient(135deg, #E0F2FE, #BAE6FD)",
+      accent: "#7DD3FC",
+      text: "#1A0F00",
+      condColor: "#38BDF8",
+      type: "snowy",
+    };
+
+  if (code <= 99)
+    return {
+      bg: "linear-gradient(135deg, #1F2937, #374151)",
+      accent: "#818CF8",
+      text: "#FFFFFF",
+      condColor: "#A78BFA",
+      type: "storm",
+    };
+
   return {
     bg: "linear-gradient(135deg, #D1FAE5, #6EE7B7)",
-    cardBg: "#F0FDF4",
     accent: "#10B981",
-    emoji: "🌡️"
+    text: "#1A0F00",
+    condColor: "#10B981",
+    type: "default",
   };
 }
 
@@ -146,17 +171,35 @@ function WeatherSummaryCard({ current, theme }) {
   const { text, emoji } = describeWeather(current.weathercode);
 
   return (
-    <div className="wcard" style={{ background: theme.bg, boxShadow: `0 4px 24px ${theme.accent}44` }}>
-      <div className="wcard-lbl">Weather Summary</div>
+    <div
+      className={`wcard ${theme.type}`}
+      style={{
+        background: theme.bg,
+        color: theme.text,
+      }}
+    >
+      <div className="wcard-title">Weather Summary</div>
       <div className="wcard-main">
-        <div className="wicon" style={{ fontSize: "3rem" }}>{emoji}</div>
+        <div className="wicon">{emoji}</div>
         <div>
           <div className="wtemp">{Math.round(current.temperature_2m)}°C</div>
-          <div className="wcond" style={{ color: theme.accent }}>{text}</div>
-          <div className="wdesc">Feels like {Math.round(current.apparent_temperature ?? current.temperature_2m)}°</div>
+          <div
+            className="wcond glass"
+            style={{
+              background: `linear-gradient(90deg, ${theme.accent}, ${theme.condColor})`,
+              WebkitBackgroundClip: "text",
+              WebkitTextFillColor: "transparent",
+            }}
+          >
+            {text}
+          </div>
+          <div className="wdesc">
+            Feels like{" "}
+            {Math.round(current.apparent_temperature ?? current.temperature_2m)}
+            °
+          </div>
         </div>
       </div>
-      <div className="wbest">✅ Best time: 2 – 5 PM</div>
     </div>
   );
 }
@@ -164,12 +207,12 @@ function WeatherSummaryCard({ current, theme }) {
 function SmartSuggestions() {
   return (
     <div>
-      <div className="slbl">Smart Suggestions</div>
+      <div className="smart-title">Smart Suggestions</div>
 
       <div className="sgrid">
         {SUGGESTIONS.map((s, i) => (
           <div key={i} className={`scard ${s.color}`}>
-            <div className="sicon">{s.icon}</div>
+            <div className="sicon">{EMOJIS[s.type] || EMOJIS.default}</div>
             <div className="stxt">{s.text}</div>
             <span className={`stag ${s.color}`}>{s.tag}</span>
           </div>
@@ -260,6 +303,9 @@ function RescheduleItem({ item, onResolve, toast }) {
 /* ── PANEL ── */
 function ReschedulePanel({ toast }) {
   const [items, setItems] = useState(RESCHEDULE_ITEMS);
+  const [newLabel, setNewLabel] = useState("");
+  const [newTime, setNewTime] = useState("");
+  const [showForm, setShowForm] = useState(false);
 
   const resolve = (id, type) => {
     setItems((prev) =>
@@ -276,25 +322,70 @@ function ReschedulePanel({ toast }) {
 
     toast(type === "earlier" ? "Rescheduled earlier" : "Moved to tomorrow");
   };
+const addPlan = () => {
+  if (!newLabel || !newTime) {
+    toast("Please enter activity and time");
+    return;
+  }
+
+  const newItem = {
+    id: Date.now(),
+    label: newLabel,
+    time: newTime,
+    icon: EMOJIS[newLabel.toLowerCase()] || "✨", 
+    conflict: false,
+    fix: "",
+  };
+
+  setItems((prev) => [...prev, newItem]);
+
+  setNewLabel("");
+  setNewTime("");
+};
+   
 
   const conflicts = items.filter((i) => i.conflict).length;
 
   return (
     <aside className="rpanel">
-      <div className="rplbl">
-        Reschedule
-        {conflicts > 0 && <span className="badge">{conflicts} alerts</span>}
-      </div>
+      <div className="task-title">Reschedule alerts</div>
 
       {items.map((i) => (
         <RescheduleItem key={i.id} item={i} onResolve={resolve} toast={toast} />
       ))}
+      {showForm ? (
+  <div className="inline-add">
+    <input
+      type="text"
+      placeholder="Activity"
+      value={newLabel}
+      onChange={(e) => setNewLabel(e.target.value)}
+    />
 
-      <button className="addbtn">＋ Add Plan</button>
+    <input
+      type="time"
+      value={newTime}
+      onChange={(e) => setNewTime(e.target.value)}
+    />
 
+    <button
+      className="confirm-btn"
+      onClick={() => {
+        addPlan();
+        setShowForm(false);
+      }}
+    >
+      ✔
+    </button>
+  </div>
+) : (
+  <button className="addbtn" onClick={() => setShowForm(true)}>
+    ＋ Add Plan
+  </button>
+)}
       <hr className="idivider" />
 
-      <div className="rplbl">Insights</div>
+      <div className="insight-title">Insights</div>
 
       {INSIGHTS.map((i, idx) => (
         <div key={idx} className="icard">
@@ -320,16 +411,15 @@ export default function App() {
   const [toast, setToast] = useState(null);
   const [weather, setWeather] = useState(null);
   const [greeting, setGreeting] = useState("");
-  const [theme, setTheme] = useState(null); 
+  const [theme, setTheme] = useState(null);
 
   useEffect(() => {
     getWeather().then((data) => {
       setWeather(data);
-      setTheme(getWeatherTheme(data.current.weathercode)); 
+      setTheme(getWeatherTheme(data.current.weathercode));
 
       const timeStr = data.current.time;
       const hour = new Date(timeStr).getHours();
-
 
       if (hour >= 5 && hour < 12) setGreeting("Good Morning");
       else if (hour >= 12 && hour < 17) setGreeting("Good Afternoon");
@@ -350,10 +440,7 @@ export default function App() {
         <main className="main-content">
           <div className="greet-row">
             <div>
-              <div className="greet-name">
-                {greeting} <span style={{ color: theme.accent }}>Fatima</span> 👋
-              </div>
-              <div className="greet-sub">Weather-based planning assistant</div>
+              <div className="greet-name">{greeting} 👋</div>
             </div>
           </div>
 
