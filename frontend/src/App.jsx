@@ -1,10 +1,9 @@
+// src/App.jsx  — WeatherWise with ML clothing recommendations
 import { useState, useEffect } from "react";
 import "./App.css";
-import { getWeather } from "./services/weather";
+import { getWeather, getMLPrediction, clothingLabel } from "./services/weather";
 import { EMOJIS } from "./data/emojiMap";
-
 /* ── DATA ── */
-
 const RESCHEDULE_ITEMS = [
   {
     id: 1,
@@ -12,7 +11,7 @@ const RESCHEDULE_ITEMS = [
     time: "6:00 PM",
     icon: "🏃",
     conflict: true,
-    fix: "Move to 3:30 PM — clear skies",
+    fix: "Daytime is more suitable for this activity",
   },
   {
     id: 2,
@@ -44,34 +43,7 @@ const RESCHEDULE_ITEMS = [
     time: "7:30 PM",
     icon: "🍽️",
     conflict: true,
-    fix: "Move to 5 PM or indoor option",
-  },
-];
-
-const SUGGESTIONS = [
-  {
-    type: "walk",
-    text: "Perfect for a walk right now",
-    tag: "Now",
-    color: "green",
-  },
-  {
-    type: "umbrella",
-    text: "Umbrella if out after 5 PM",
-    tag: "After 5",
-    color: "blue",
-  },
-  {
-    type: "jacket",
-    text: "Light jacket for this evening",
-    tag: "6 PM+",
-    color: "violet",
-  },
-  {
-    type: "pollen",
-    text: "Low pollen today",
-    tag: "All day",
-    color: "amber",
+    fix: "Avoid later — wind conditions worsen",
   },
 ];
 
@@ -80,17 +52,25 @@ const INSIGHTS = [
   { icon: "⏰", body: "Best productivity time is 2–5 PM" },
 ];
 
+const formatDate = (timeString) => {
+  const date = new Date(timeString);
+
+  return date.toLocaleDateString("en-US", {
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+  });
+};
 /* ── TOAST ── */
 function Toast({ msg, onDone }) {
   useEffect(() => {
     const t = setTimeout(onDone, 2500);
     return () => clearTimeout(t);
   }, []);
-
   return <div className="toast">{msg}</div>;
 }
 
-/* ── WEATHER ── */
+/* ── THEME ── */
 function getWeatherTheme(code) {
   if (code === 0)
     return {
@@ -154,82 +134,35 @@ function getWeatherTheme(code) {
     type: "default",
   };
 }
-function isNight(timeStr) {
-  const hour = new Date(timeStr).getHours();
-  return hour < 6 || hour >= 18; // night from 6PM → 6AM
+
+function describeWeather(code) {
+  if (code === 0) return { text: "Clear sky", emoji: "☀️" };
+  if (code <= 2) return { text: "Partly cloudy", emoji: "⛅" };
+  if (code === 3) return { text: "Overcast", emoji: "☁️" };
+  if (code <= 49) return { text: "Foggy", emoji: "🌫️" };
+  if (code <= 67) return { text: "Rainy", emoji: "🌧️" };
+  if (code <= 77) return { text: "Snowy", emoji: "❄️" };
+  if (code <= 82) return { text: "Showers", emoji: "🌦️" };
+  if (code <= 99) return { text: "Thunderstorm", emoji: "⛈️" };
+  return { text: "Unknown", emoji: "🌡️" };
 }
 
-function describeWeather(code, timeStr) {
-  const night = isNight(timeStr);
-
-  if (code === 0)
-    return {
-      text: "Clear sky",
-      emoji: night ? "🌙" : "☀️",
-    };
-
-  if (code <= 2)
-    return {
-      text: "Partly cloudy",
-      emoji: night ? "☁️" : "⛅",
-    };
-
-  if (code === 3)
-    return {
-      text: "Overcast",
-      emoji: "☁️",
-    };
-
-  if (code <= 49)
-    return {
-      text: "Foggy",
-      emoji: "🌫️",
-    };
-
-  if (code <= 67)
-    return {
-      text: "Rainy",
-      emoji: night ? "🌧️" : "🌧️",
-    };
-
-  if (code <= 77)
-    return {
-      text: "Snowy",
-      emoji: night ? "❄️" : "❄️",
-    };
-
-  if (code <= 82)
-    return {
-      text: "Showers",
-      emoji: night ? "🌧️" : "🌦️",
-    };
-
-  if (code <= 99)
-    return {
-      text: "Thunderstorm",
-      emoji: "⛈️",
-    };
-
-  return {
-    text: "Unknown",
-    emoji: "🌡️",
-  };
-}
-
+/* ── WEATHER CARD ── */
 function WeatherSummaryCard({ current, theme }) {
-  const { text, emoji } = describeWeather(current.weathercode, current.time);
-
+  const { text, emoji } = describeWeather(current.weathercode);
   return (
     <div
-      className={`wcard ${theme.type}`}
+      className="wcard"
       style={{
         background: theme.bg,
-        color: theme.text,
+        boxShadow: `0 4px 24px ${theme.accent}44`,
       }}
     >
       <div className="wcard-title">Weather Summary</div>
       <div className="wcard-main">
-        <div className="wicon">{emoji}</div>
+        <div className="wicon" style={{ fontSize: "7rem" }}>
+          {emoji}
+        </div>
         <div>
           <div className="wtemp">{Math.round(current.temperature_2m)}°C</div>
           <div
@@ -252,16 +185,179 @@ function WeatherSummaryCard({ current, theme }) {
     </div>
   );
 }
-/* ── SUGGESTIONS ── */
-function SmartSuggestions() {
+
+/* ── ML CLOTHING CARD ── */
+const CLOTHING_EMOJI = {
+  heavy_winter_coat_gloves_hat: "🧤",
+  winter_coat_scarf_gloves: "🧣",
+  warm_jacket_layers: "🧥",
+  light_jacket_or_sweater: "👕",
+  long_sleeves_light_layer: "👔",
+  t_shirt_comfortable: "👕",
+  light_breathable_clothing: "🩱",
+  very_light_clothing_stay_hydrated: "😎",
+};
+
+function MLClothingCard({ prediction, loading, error, theme }) {
+  if (loading) {
+    return (
+      <div
+        className="wcard"
+        style={{ background: theme?.cardBg ?? "#fff", minHeight: 90 }}
+      >
+        <div className="wcard-lbl">👗 AI Clothing Recommendation</div>
+        <div style={{ color: "#888", padding: "8px 0" }}>
+          Analysing weather with ML model…
+        </div>
+      </div>
+    );
+  }
+  if (error) {
+    return (
+      <div className="wcard" style={{ background: "#FEF2F2" }}>
+        <div className="wcard-lbl">👗 AI Clothing Recommendation</div>
+        <div style={{ color: "#EF4444", fontSize: 13 }}>
+          Backend not reachable. Make sure <code>uvicorn server:app</code> is
+          running on port 8000.
+        </div>
+      </div>
+    );
+  }
+  if (!prediction) return null;
+
+  const emoji = CLOTHING_EMOJI[prediction.clothing_recommendation] ?? "👕";
+  const conf = Math.round(prediction.clothing_confidence * 100);
+  const uConf = Math.round(prediction.umbrella_confidence * 100);
+
+  return (
+    <div
+      className="wcard"
+      style={{
+        background: theme?.cardBg ?? "#ffffff76",
+        borderTop: `4px solid ${theme?.accent ?? "#6366f1"}`,
+      }}
+    >
+      <div
+        style={{ display: "flex", alignItems: "center", gap: 14, marginTop: 8 }}
+      >
+        <span style={{ fontSize: "2.8rem" }}>{emoji}</span>
+        <div>
+          <div style={{ fontWeight: 700, fontSize: 16, lineHeight: 1.3 }}>
+            {clothingLabel(prediction.clothing_recommendation)}
+          </div>
+          {/* <div style={{ fontSize: 12, color: "#888", marginTop: 2 }}>
+            Model confidence: {conf}%
+          </div> */}
+        </div>
+      </div>
+
+      {/* Umbrella row */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 10,
+          marginTop: 12,
+          padding: "8px 12px",
+          background: prediction.umbrella_needed ? "#eff6ffa0" : "#F0FDF4",
+          borderRadius: 8,
+        }}
+      >
+        <span style={{ fontSize: "1.5rem" }}>
+          {prediction.umbrella_needed ? "☔" : "🌤️"}
+        </span>
+        <div>
+          <div style={{ fontWeight: 600, fontSize: 14 }}>
+            {prediction.umbrella_needed
+              ? "Bring an umbrella!"
+              : "No umbrella needed"}
+          </div>
+          {/* <div style={{ fontSize: 11, color: "#888" }}>
+            Confidence: {uConf}%
+          </div> */}
+        </div>
+      </div>
+
+      {/* Full advice text */}
+      <div
+        style={{
+          marginTop: 10,
+          fontSize: 13,
+          color: "#555",
+          fontStyle: "italic",
+        }}
+      >
+        💡 {prediction.recommendation_text}
+      </div>
+    </div>
+  );
+}
+
+/* ── SMART SUGGESTIONS ── */
+function SmartSuggestions({ mlPrediction }) {
+  const suggestions = mlPrediction
+    ? [
+        {
+          icon: CLOTHING_EMOJI[mlPrediction.clothing_recommendation] ?? "👕",
+          text: clothingLabel(mlPrediction.clothing_recommendation),
+          tag: "Now",
+          color: "violet",
+        },
+        {
+          icon: mlPrediction.umbrella_needed ? "☔" : "🌤️",
+          text: mlPrediction.umbrella_needed
+            ? "Umbrella recommended"
+            : "No umbrella needed",
+          tag: "Today",
+          color: "blue",
+        },
+        {
+          icon: "🚶",
+          text: "Perfect for a walk right now",
+          tag: "Now",
+          color: "green",
+        },
+        {
+          icon: "🌿",
+          text: "Low pollen today",
+          tag: "All day",
+          color: "amber",
+        },
+      ]
+    : [
+        {
+          icon: "🚶",
+          text: "Perfect for a walk right now",
+          tag: "Now",
+          color: "green",
+        },
+        {
+          icon: "☔",
+          text: "Umbrella if out after 5 PM",
+          tag: "After 5",
+          color: "blue",
+        },
+        {
+          icon: "🧥",
+          text: "Light jacket for this evening",
+          tag: "6 PM+",
+          color: "violet",
+        },
+        {
+          icon: "🌿",
+          text: "Low pollen today",
+          tag: "All day",
+          color: "amber",
+        },
+      ];
+
   return (
     <div>
       <div className="smart-title">Smart Suggestions</div>
-
       <div className="sgrid">
-        {SUGGESTIONS.map((s, i) => (
+        {suggestions.map((s, i) => (
           <div key={i} className={`scard ${s.color}`}>
-            <div className="sicon">{EMOJIS[s.type] || EMOJIS.default}</div>
+            <div className="sicon">{s.icon}</div>
             <div className="stxt">{s.text}</div>
             <span className={`stag ${s.color}`}>{s.tag}</span>
           </div>
@@ -271,11 +367,12 @@ function SmartSuggestions() {
   );
 }
 
-/* ── ITEM ── */
+/* ── RESCHEDULE ITEM ── */
 function RescheduleItem({ item, onResolve, onDelete, toast }) {
   const [open, setOpen] = useState(false);
   const [done, setDone] = useState(false);
-
+  const [editing, setEditing] = useState(false);
+  const [newTime, setNewTime] = useState("");
   const stop = (e, fn) => {
     e.stopPropagation();
     fn();
@@ -284,52 +381,66 @@ function RescheduleItem({ item, onResolve, onDelete, toast }) {
   return (
     <div
       className={`titem ${item.conflict && !done ? "conflict" : ""} ${done ? "done" : ""}`}
-      onClick={() => setOpen(!open)}
+      onClick={() => setOpen(true)}
     >
       <div className="trow">
         <div className="temoji">{item.icon}</div>
-
         <div style={{ flex: 1 }}>
           <div className={`tname ${done ? "done" : ""}`}>{item.label}</div>
           <div className="ttime">⏳ {item.time}</div>
         </div>
-
         {item.conflict && !done && <div className="tbadge">⚠️ Conflict</div>}
       </div>
-
       {open && !done && (
         <div className="texpand">
           {item.fix && <div className="thint">💡 {item.fix}</div>}
-
           <div className="tbtns">
             {item.conflict && (
               <>
                 <button
-                  className="tbtn move"
-                  onClick={(e) =>
-                    stop(e, () => {
-                      onResolve(item.id, "earlier");
-                      setOpen(false);
-                    })
-                  }
-                >
-                  Earlier
-                </button>
-
-                <button
                   className="tbtn later"
                   onClick={(e) =>
                     stop(e, () => {
-                      onResolve(item.id, "tomorrow");
-                      setOpen(false);
+                      setEditing(true);
                     })
                   }
                 >
-                  Tomorrow
+                  Reschedule
                 </button>
+                {editing && (
+                  <div
+                    style={{ marginTop: 10 }}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <input
+                      type="time"
+                      value={newTime}
+                      onChange={(e) => setNewTime(e.target.value)}
+                      style={{
+                        padding: "6px",
+                        borderRadius: "8px",
+                        border: "1px solid #ccc",
+                        marginRight: "6px",
+                      }}
+                    />
+
+                    <button
+                      className="tbtn move"
+                      onClick={(e) =>
+                        stop(e, () => {
+                          if (!newTime) return;
+
+                          onResolve(item.id, newTime);
+                          setEditing(false);
+                        })
+                      }
+                    >
+                      Save
+                    </button>
+                  </div>
+                )}
               </>
             )}
-
             <button
               className="tbtn doneb"
               onClick={(e) =>
@@ -342,14 +453,16 @@ function RescheduleItem({ item, onResolve, onDelete, toast }) {
             >
               Done
             </button>
+
             <button
-              className="delete-btn"
-              onClick={(e) => {
-                e.stopPropagation();
-                onDelete(item.id);
-              }}
+              className="tbtn delete"
+              onClick={(e) =>
+                stop(e, () => {
+                  onDelete(item.id);
+                })
+              }
             >
-              🗑️
+              🗑 Delete
             </button>
           </div>
         </div>
@@ -358,24 +471,27 @@ function RescheduleItem({ item, onResolve, onDelete, toast }) {
   );
 }
 
-/* ── PANEL ── */
-function convertToMinutes(timeStr) {
-  const [time, modifier] = timeStr.split(" ");
-  let [hours, minutes] = time.split(":").map(Number);
-
-  if (modifier === "PM" && hours !== 12) hours += 12;
-  if (modifier === "AM" && hours === 12) hours = 0;
-
-  return hours * 60 + minutes;
-}
-
+/* ── RESCHEDULE PANEL ── */
 function ReschedulePanel({ toast }) {
   const [items, setItems] = useState(RESCHEDULE_ITEMS);
   const [newLabel, setNewLabel] = useState("");
   const [newTime, setNewTime] = useState("");
   const [showForm, setShowForm] = useState(false);
+  const [type, setType] = useState("outdoor");
 
-  const resolve = (id, type) => {
+  const formatTime = (time) => {
+    const [h, m] = time.split(":");
+    const hour = h % 12 || 12;
+    const ampm = h >= 12 ? "PM" : "AM";
+    return `${hour}:${m} ${ampm}`;
+  };
+
+  const deleteItem = (id) => {
+    setItems((prev) => prev.filter((i) => i.id !== id));
+    toast("Task deleted");
+  };
+
+  const resolve = (id, newTime) => {
     setItems((prev) =>
       prev.map((i) =>
         i.id !== id
@@ -383,41 +499,36 @@ function ReschedulePanel({ toast }) {
           : {
               ...i,
               conflict: false,
-              time: type === "earlier" ? "3:30 PM" : "Tomorrow",
+              time: formatTime(newTime),
             },
       ),
     );
 
-    toast(type === "earlier" ? "Rescheduled earlier" : "Moved to tomorrow");
+    toast("Rescheduled successfully");
   };
-  const deleteItem = (id) => {
-    if (!confirm("Delete this activity?")) return;
-    setItems((prev) => prev.filter((item) => item.id !== id));
-    toast("Deleted");
-  };
-
   const addPlan = () => {
     if (!newLabel || !newTime) {
       toast("Please enter activity and time");
       return;
     }
-    const conflict = hasConflict(newTime, items);
 
     const newItem = {
       id: Date.now(),
       label: newLabel,
       time: newTime,
       icon: EMOJIS[newLabel.toLowerCase()] || "✨",
-      conflict: conflict,
-      fix: conflict ? "This overlaps with another plan" : "",
+      type,
+      conflict: false,
+      fix: "",
     };
 
     setItems((prev) => [...prev, newItem]);
 
     setNewLabel("");
     setNewTime("");
+    setType("outdoor");
+    setShowAdd(false);
   };
-
   const conflicts = items.filter((i) => i.conflict).length;
 
   return (
@@ -433,6 +544,7 @@ function ReschedulePanel({ toast }) {
           toast={toast}
         />
       ))}
+
       {showForm ? (
         <div className="inline-add">
           <input
@@ -447,6 +559,21 @@ function ReschedulePanel({ toast }) {
             value={newTime}
             onChange={(e) => setNewTime(e.target.value)}
           />
+          <div style={{ display: "flex", gap: 10, marginTop: 10 }}>
+            <button
+              className={`type-btn ${type === "indoor" ? "active" : ""}`}
+              onClick={() => setType("indoor")}
+            >
+              🏠 Indoor
+            </button>
+
+            <button
+              className={`type-btn ${type === "outdoor" ? "active" : ""}`}
+              onClick={() => setType("outdoor")}
+            >
+              🌳 Outdoor
+            </button>
+          </div>
 
           <button
             className="confirm-btn"
@@ -476,25 +603,6 @@ function ReschedulePanel({ toast }) {
     </aside>
   );
 }
-function hasConflict(newTime, items) {
-  const newStart = convertToMinutes(newTime);
-  const newEnd = newStart + 60; // assume 1-hour activity
-
-  return items.some((item) => {
-    const itemStart = convertToMinutes(item.time);
-    const itemEnd = itemStart + 60;
-
-    return newStart < itemEnd && newEnd > itemStart;
-  });
-}
-function getAfternoonRisk(hourlyData) {
-  // hours 17-21 = evening
-  const eveningRain = hourlyData.precipitation_probability
-    .slice(17, 21)
-    .some((prob) => prob > 40);
-
-  return eveningRain ? "Bring an umbrella if going out tonight!" : null;
-}
 
 /* ── APP ── */
 export default function App() {
@@ -502,40 +610,56 @@ export default function App() {
   const [weather, setWeather] = useState(null);
   const [greeting, setGreeting] = useState("");
   const [theme, setTheme] = useState(null);
+  const [mlPred, setMlPred] = useState(null);
+  const [mlLoading, setMlLoading] = useState(true);
+  const [mlError, setMlError] = useState(false);
+
+  const LAT = 41.01;
+  const LON = 28.97;
 
   useEffect(() => {
-    getWeather().then((data) => {
+    // Fetch raw weather (for existing UI)
+    getWeather(LAT, LON).then((data) => {
       setWeather(data);
       setTheme(getWeatherTheme(data.current.weathercode));
-
-      const timeStr = data.current.time;
-      const hour = new Date(timeStr).getHours();
-
+      const hour = new Date(data.current.time).getHours();
       if (hour >= 5 && hour < 12) setGreeting("Good Morning");
       else if (hour >= 12 && hour < 17) setGreeting("Good Afternoon");
       else if (hour >= 17 && hour < 21) setGreeting("Good Evening");
       else setGreeting("Good Night");
     });
+
+    // Fetch ML prediction separately (backend may be offline → graceful fallback)
+    getMLPrediction(LAT, LON)
+      .then((pred) => {
+        setMlPred(pred);
+        setMlLoading(false);
+      })
+      .catch(() => {
+        setMlError(true);
+        setMlLoading(false);
+      });
   }, []);
 
-  if (!weather || !theme) return <p>Loading weather...</p>;
-
-  const current = weather.current;
+  if (!weather || !theme) return <p>Loading weather…</p>;
 
   return (
     <>
       {toast && <Toast msg={toast} onDone={() => setToast(null)} />}
-
       <div className="app-shell">
         <main className="main-content">
           <div className="greet-row">
-            <div>
+            <div className="greet-container">
               <div className="greet-name">{greeting} 👋</div>
+              <div className="greet-date">
+                {formatDate(weather.current.time)}
+              </div>
             </div>
           </div>
 
-          <WeatherSummaryCard current={current} theme={theme} />
-          <SmartSuggestions />
+          <WeatherSummaryCard current={weather.current} theme={theme} />
+
+          <SmartSuggestions mlPrediction={mlPred} />
         </main>
 
         <ReschedulePanel toast={setToast} />
