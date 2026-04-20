@@ -33,6 +33,7 @@ body {
   background: linear-gradient(135deg, #dbeafe, #fef3c7, #e0f2fe);
   background-size: 300% 300%;
   animation: bgMove 12s ease infinite;
+
 }
 
 @keyframes bgMove {
@@ -350,7 +351,7 @@ body {
     left: 50% !important;
     transform: translateX(-50%) !important;
     width: calc(100vw - 32px) !important;
-    max-width: 380px !important;
+    max-width: 250px !important;
     z-index: 99999 !important;
     overflow-wrap: break-word;
     word-break: break-word;

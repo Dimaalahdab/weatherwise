@@ -1,7 +1,7 @@
 // src/components/MLBadge.jsx
 // 8 AI models panel. Defensive: handles any shape the service returns.
 
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 
 const MODEL_META = {
   clothing:         { name: "Clothing Advisor",   icon: "👕" },
@@ -14,64 +14,71 @@ const MODEL_META = {
   outdoorPoor:      { name: "Outdoor Conditions", icon: "🌿" },
 };
 
-// Returns { label: string, active: boolean } for any model key + value
 function getStatus(key, val, mlPrediction) {
-  // Clothing
   if (key === "clothing") {
     const rec = mlPrediction?.clothing_recommendation;
     if (!rec) return { label: "—", active: false };
     const heavy = rec.includes("winter") || rec.includes("coat");
     return { label: heavy ? "Layer up" : "Light wear", active: heavy };
   }
-
-  // Umbrella
   if (key === "umbrella") {
     const needed = mlPrediction?.umbrella_needed;
     if (needed === undefined) return { label: "—", active: false };
     return { label: needed ? "Bring one!" : "Not needed", active: needed };
   }
-
-  // 🔥 NEW: handle real mlInsights properly
   if (!val) return { label: "—", active: false };
-
   if (key === "uvProtection") {
     const lbl = val.label;
     if (!lbl || lbl === "none") return { label: "No risk", active: false };
     return { label: lbl, active: true };
   }
-
   if (key === "roadSurface") {
     const lbl = val.label || "dry";
     return { label: lbl, active: lbl !== "dry" };
   }
-
-  // binary models
   const triggered = val.triggered === true;
   return { label: triggered ? "Alert" : "Clear", active: triggered };
 }
 
 export default function MLBadge({ mlInsights, mlPrediction }) {
   const [open, setOpen] = useState(false);
+  const wrapperRef      = useRef(null);
 
-  const allModels = Object.entries(MODEL_META);
+  // ── Close dropdown when the user scrolls anywhere ──────────────────────
+  useEffect(() => {
+    if (!open) return;
+    const close = () => setOpen(false);
+    window.addEventListener("scroll", close, { passive: true, capture: true });
+    return () => window.removeEventListener("scroll", close, { capture: true });
+  }, [open]);
 
+  // ── Close dropdown when clicking outside ───────────────────────────────
+  useEffect(() => {
+    if (!open) return;
+    const handleOutside = (e) => {
+      if (wrapperRef.current && !wrapperRef.current.contains(e.target)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleOutside);
+    return () => document.removeEventListener("mousedown", handleOutside);
+  }, [open]);
+
+  const allModels   = Object.entries(MODEL_META);
   const activeCount = allModels.filter(([key]) => {
     const val =
-  key === "clothing"
-    ? mlPrediction?.clothing_recommendation
-    : key === "umbrella"
-    ? mlPrediction?.umbrella_needed
-    : mlInsights?.[key];
+      key === "clothing" ? mlPrediction?.clothing_recommendation
+      : key === "umbrella" ? mlPrediction?.umbrella_needed
+      : mlInsights?.[key];
     return getStatus(key, val, mlPrediction).active;
   }).length;
 
-  // Loading state: mlPrediction hasn't arrived yet
   const isLoading = !mlPrediction && !mlInsights;
 
   return (
-    <div style={{ position: "relative", display: "inline-block" }}>
+    <div ref={wrapperRef} style={{ position: "relative", display: "inline-block" }}>
       <button
-        onClick={() => setOpen(o => !o)}
+        onClick={() => setOpen((o) => !o)}
         style={{
           display: "flex", alignItems: "center", gap: 6,
           padding: "6px 12px", borderRadius: 99,
@@ -99,11 +106,23 @@ export default function MLBadge({ mlInsights, mlPrediction }) {
         <div
           className="ml-dropdown"
           style={{
-            position: "absolute", top: "calc(100% + 8px)", right: 0, zIndex: 999,
-            background: "rgba(255,255,255,0.95)", backdropFilter: "blur(16px)",
-            borderRadius: 16, border: "1px solid rgba(167,139,250,0.2)",
+            // ── Stays absolutely positioned relative to its parent ──────
+            // On mobile the CSS overrides in App.css previously set
+            // position:fixed which caused it to scroll with the page.
+            // Now we keep it absolute everywhere and just adjust width.
+            position: "absolute",
+            top: "calc(100% + 8px)",
+            right: 0,
+            zIndex: 9999,
+            background: "rgba(255,255,255,0.97)",
+            backdropFilter: "blur(16px)",
+            borderRadius: 16,
+            border: "1px solid rgba(167,139,250,0.2)",
             boxShadow: "0 8px 32px rgba(0,0,0,0.12)",
-            padding: "14px", minWidth: 260,
+            padding: "14px",
+            minWidth: 260,
+            // Prevent overflow off-screen on narrow viewports
+            maxWidth: "calc(100vw - 32px)",
           }}
         >
           <div style={{

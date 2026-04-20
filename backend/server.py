@@ -16,6 +16,7 @@ import os
 import math
 import datetime
 from pathlib import Path
+from typing import Optional, Any
 
 import numpy as np
 import joblib
@@ -42,12 +43,12 @@ ACTIVITY_META_PATH    = MODEL_DIR / "activity_metadata.pkl"
 # ── Load Safety ML models (6 models) ───────────────────────────────────────
 print("Loading safety models...")
 
-UV_MODEL_PATH          = MODEL_DIR / "uv_model.pkl"
-HYDRATION_MODEL_PATH   = MODEL_DIR / "hydration_model.pkl"
-ROAD_MODEL_PATH        = MODEL_DIR / "road_surface_model.pkl"
-WIND_ALERT_MODEL_PATH  = MODEL_DIR / "wind_alert_model.pkl"
-WIND_CHILL_MODEL_PATH  = MODEL_DIR / "wind_chill_model.pkl"
-OUTDOOR_MODEL_PATH     = MODEL_DIR / "outdoor_poor_model.pkl"
+UV_MODEL_PATH          = MODEL_DIR / "model_A.pkl"
+HYDRATION_MODEL_PATH   = MODEL_DIR / "model_B.pkl"
+ROAD_MODEL_PATH        = MODEL_DIR / "model_C.pkl"
+WIND_ALERT_MODEL_PATH  = MODEL_DIR / "model_D.pkl"
+WIND_CHILL_MODEL_PATH  = MODEL_DIR / "model_E.pkl"
+OUTDOOR_MODEL_PATH     = MODEL_DIR / "model_F.pkl"
 
 uv_model          = joblib.load(UV_MODEL_PATH)
 hydration_model   = joblib.load(HYDRATION_MODEL_PATH)
@@ -56,7 +57,19 @@ wind_alert_model  = joblib.load(WIND_ALERT_MODEL_PATH)
 wind_chill_model  = joblib.load(WIND_CHILL_MODEL_PATH)
 outdoor_model     = joblib.load(OUTDOOR_MODEL_PATH)
 
+SAFETY_FEATURE_LIST_PATH = MODEL_DIR / "safety_feature_list.pkl"
 
+try:
+    safety_feature_list = joblib.load(SAFETY_FEATURE_LIST_PATH)
+    print(f"✅ Safety feature list loaded: {len(safety_feature_list)} features")
+    print(f"   Features: {safety_feature_list}")
+except FileNotFoundError:
+    # Graceful fallback — will still fail if counts don't match,
+    # but at least the error message will be informative
+    safety_feature_list = None
+    print("⚠️  safety_feature_list.pkl not found — "
+          "build_safety_features will raise a clear error at inference time")
+    
 # ── Load models at startup ──────────────────────────────────────────────────
 print("Loading clothing + umbrella models...")
 clothing_rf    = joblib.load(CLOTHING_MODEL_PATH)
@@ -105,6 +118,34 @@ class ActivitySuggestion(BaseModel):
     emoji:      str    # UI emoji
 
 
+# ── Safety insight sub-models ───────────────────────────────────────────────
+class UVProtection(BaseModel):
+    label: str   # "none" | "sunglasses" | "sunscreen"
+
+class HydrationAlert(BaseModel):
+    triggered: bool
+
+class RoadSurface(BaseModel):
+    label: str   # "dry" | "wet" | "icy"
+
+class WindAlert(BaseModel):
+    triggered: bool
+
+class WindChillWarning(BaseModel):
+    triggered: bool
+
+class OutdoorPoor(BaseModel):
+    triggered: bool
+
+class MLInsights(BaseModel):
+    uvProtection:     UVProtection
+    hydrationAlert:   HydrationAlert
+    roadSurface:      RoadSurface
+    windAlert:        WindAlert
+    windChillWarning: WindChillWarning
+    outdoorPoor:      OutdoorPoor
+
+
 class PredictAllResponse(BaseModel):
     clothing_recommendation: str
     clothing_confidence:     float
@@ -117,6 +158,7 @@ class PredictAllResponse(BaseModel):
     hour_of_day:             int
     season:                  str
     recommendation_text:     str
+    mlInsights:              MLInsights          # ← NOW PROPERLY DECLARED
 
 
 # ── Helper: Weather fetch ───────────────────────────────────────────────────
@@ -247,19 +289,12 @@ def build_clothing_features(w: dict) -> np.ndarray:
 
 
 # ── Helper: Build activity feature vector ──────────────────────────────────
-# NEW APPROACH: build features for a specific (weather, activity) pair.
-# Called 8 times per request, results sorted to get Top 3.
-
 OUTDOOR_PHYSICAL = {"cycling", "running", "sports"}
 OUTDOOR_LEISURE  = {"picnic", "walking", "outdoor_work"}
 INDOOR_TRANSPORT = {"commute", "driving"}
 
 
 def build_activity_features(w: dict, activity_name: str) -> np.ndarray:
-    """
-    Build a feature vector for the given (weather, activity) pair.
-    The model predicts the suitability score (0–10) for that activity.
-    """
     h    = w["hour_of_day"]
     m    = w["month"]
     dow  = w.get("day_of_week", 0)
@@ -288,13 +323,11 @@ def build_activity_features(w: dict, activity_name: str) -> np.ndarray:
         act_enc = 0
 
     season_str = w["season"]
-    # Map "autumn" (from OpenMeteo parser) to "spring" fallback if not in training data
     if season_str not in le_season.classes_:
         season_str = "spring"
     season_enc = int(le_season.transform([season_str])[0])
 
     weather_str = w["weather_condition"]
-    # Map unknown weather conditions to most similar seen in training
     WEATHER_MAP = {
         "fog": "cloudy",
         "autumn": "cloudy",
@@ -305,15 +338,12 @@ def build_activity_features(w: dict, activity_name: str) -> np.ndarray:
     weather_enc = int(le_weather.transform([weather_str])[0])
 
     features = [
-        # Core weather (8)
         w["temperature_c"], w["feels_like_c"], feels_delta,
         w["humidity_pct"], wind, precip,
         w["cloud_cover_pct"], w["uv_index"],
-        # Cyclical time (6)
         math.sin(2 * math.pi * h / 24), math.cos(2 * math.pi * h / 24),
         math.sin(2 * math.pi * m / 12), math.cos(2 * math.pi * m / 12),
         math.sin(2 * math.pi * dow / 7), math.cos(2 * math.pi * dow / 7),
-        # Binary flags (9)
         w.get("is_weekend", 0),
         is_cold,
         int(5 <= w["temperature_c"] < 15),
@@ -321,14 +351,10 @@ def build_activity_features(w: dict, activity_name: str) -> np.ndarray:
         int(w["temperature_c"] >= 28),
         is_precip, int(precip > 5),
         int(wind > 30), int(w["uv_index"] > 6),
-        # Derived (2)
         temp_humidity, comfort_score,
-        # Activity category flags (3)
         is_op, is_ol, is_tr,
-        # Activity×Weather interactions (5)
         is_op * precip, is_op * wind, is_op * is_cold,
         is_ol * precip, is_tr * is_precip,
-        # Categorical encoded (3)
         act_enc, season_enc, weather_enc,
     ]
 
@@ -336,15 +362,11 @@ def build_activity_features(w: dict, activity_name: str) -> np.ndarray:
 
 
 def predict_top_activities(w: dict, n: int = 3) -> list[dict]:
-    """
-    Score all known activities for the current weather and return top-n.
-    Returns: [{"activity": str, "score": float (0-10), "confidence": float (0-1)}, ...]
-    """
     results = []
     for act_name in le_activity.classes_:
         feat      = build_activity_features(w, act_name)
         raw_score = float(activity_model.predict(feat)[0])
-        raw_score = max(0.0, min(10.0, raw_score))  # clip to [0, 10]
+        raw_score = max(0.0, min(10.0, raw_score))
         results.append({
             "activity":   act_name,
             "score":      round(raw_score, 2),
@@ -396,8 +418,45 @@ def build_recommendation_text(clothing: str, umbrella: bool,
     return f"Wear {advice} ({temp:.0f}°C, {condition.replace('_', ' ')}).{umbrella_txt}"
 
 
+def _compute_safety_feature_map(w: dict) -> dict:
+    """
+    Compute every possible safety feature from the weather dict w.
+    Keys must exactly match the names saved in safety_feature_list.pkl.
+    """
+    h = w["hour_of_day"]
+    m = w["month"]
+    return {
+        # ── Raw weather ──────────────────────────────────────────────────
+        "temperature_c":   w["temperature_c"],
+        "feels_like_c":    w["feels_like_c"],
+        "humidity_pct":    w["humidity_pct"],
+        "wind_speed_kmh":  w["wind_speed_kmh"],
+        "wind_gust_kmh":   w["wind_gust_kmh"],
+        "precipitation_mm": w["precipitation_mm"],
+        "cloud_cover_pct": w["cloud_cover_pct"],
+        "uv_index":        w["uv_index"],
+        # ── Engineered ──────────────────────────────────────────────────
+        "feels_delta":     w["feels_like_c"] - w["temperature_c"],
+        "temp_humidity":   w["temperature_c"] * w["humidity_pct"] / 100,
+        "wind_chill_idx":  w["wind_speed_kmh"] * (1 - w["temperature_c"] / 30),
+        "is_cold":         int(w["temperature_c"] < 5),
+        "is_hot":          int(w["temperature_c"] > 30),
+        "is_precip":       int(w["precipitation_mm"] > 0),
+        "high_wind":       int(w["wind_speed_kmh"] > 30),
+        "high_uv":         int(w["uv_index"] > 6),
+        "hour_sin":        math.sin(2 * math.pi * h / 24),
+        "hour_cos":        math.cos(2 * math.pi * h / 24),
+        "month_sin":       math.sin(2 * math.pi * m / 12),
+        "month_cos":       math.cos(2 * math.pi * m / 12),
+        "is_weekend":      w.get("is_weekend", 0),
+    }
+
+
 def build_safety_features(w: dict) -> np.ndarray:
+    h = w["hour_of_day"]
+    m = w["month"]
     return np.array([[
+        # ── Raw (your original 8) ──────────────────────────
         w["temperature_c"],
         w["feels_like_c"],
         w["humidity_pct"],
@@ -405,9 +464,24 @@ def build_safety_features(w: dict) -> np.ndarray:
         w["wind_gust_kmh"],
         w["precipitation_mm"],
         w["cloud_cover_pct"],
-        w["uv_index"]
+        w["uv_index"],
+        # ── Engineered (the 13 your model was trained with) ─
+        w["feels_like_c"] - w["temperature_c"],                    # feels_delta
+        w["temperature_c"] * w["humidity_pct"] / 100,              # temp_humidity
+        w["wind_speed_kmh"] * (1 - w["temperature_c"] / 30),       # wind_chill_idx
+        int(w["temperature_c"] < 5),                               # is_cold
+        int(w["temperature_c"] > 30),                              # is_hot
+        int(w["precipitation_mm"] > 0),                            # is_precip
+        int(w["wind_speed_kmh"] > 30),                             # high_wind
+        int(w["uv_index"] > 6),                                    # high_uv
+        math.sin(2 * math.pi * h / 24),                            # hour_sin
+        math.cos(2 * math.pi * h / 24),                            # hour_cos
+        math.sin(2 * math.pi * m / 12),                            # month_sin
+        math.cos(2 * math.pi * m / 12),                            # month_cos
+        w.get("is_weekend", 0),                                    # is_weekend
     ]])
-def predict_ml_insights(w: dict):
+
+def predict_ml_insights(w: dict) -> MLInsights:
     X = build_safety_features(w)
 
     uv_pred        = uv_model.predict(X)[0]
@@ -417,32 +491,24 @@ def predict_ml_insights(w: dict):
     chill_pred     = wind_chill_model.predict(X)[0]
     outdoor_pred   = outdoor_model.predict(X)[0]
 
-    return {
-        "uvProtection": {
-            "label": ["none", "sunglasses", "sunscreen"][int(uv_pred)]
-        },
-        "hydrationAlert": {
-            "triggered": bool(hydration_pred)
-        },
-        "roadSurface": {
-            "label": ["dry", "wet", "icy"][int(road_pred)]
-        },
-        "windAlert": {
-            "triggered": bool(wind_pred)
-        },
-        "windChillWarning": {
-            "triggered": bool(chill_pred)
-        },
-        "outdoorPoor": {
-            "triggered": bool(outdoor_pred)
-        }
-    }
+    return MLInsights(
+        uvProtection     = UVProtection(label=["none", "sunglasses", "sunscreen"][int(uv_pred)]),
+        hydrationAlert   = HydrationAlert(triggered=bool(hydration_pred)),
+        roadSurface      = RoadSurface(label=["dry", "wet", "icy"][int(road_pred)]),
+        windAlert        = WindAlert(triggered=bool(wind_pred)),
+        windChillWarning = WindChillWarning(triggered=bool(chill_pred)),
+        outdoorPoor      = OutdoorPoor(triggered=bool(outdoor_pred)),
+    )
+
+
 # ── Routes ──────────────────────────────────────────────────────────────────
 @app.get("/health")
 def health():
     return {
         "status": "ok",
-        "models": ["clothing_rf", "umbrella_rf", "activity_gb_regressor"],
+        "models": ["clothing_rf", "umbrella_rf", "activity_gb_regressor",
+                   "uv_model", "hydration_model", "road_model",
+                   "wind_alert_model", "wind_chill_model", "outdoor_model"],
         "activity_model_r2": activity_meta.get("r2"),
     }
 
@@ -450,7 +516,8 @@ def health():
 @app.post("/predict/all", response_model=PredictAllResponse)
 def predict_all(req: PredictRequest):
     """
-    Returns clothing recommendation + umbrella flag + top-3 activity suggestions.
+    Returns clothing recommendation + umbrella flag + top-3 activity suggestions
+    + mlInsights from 6 safety models.
     """
     # 1. Fetch live weather
     try:
@@ -461,7 +528,7 @@ def predict_all(req: PredictRequest):
     now = datetime.datetime.now()
     w   = parse_open_meteo(raw, now)
 
-    # 2. Clothing + umbrella (UNCHANGED)
+    # 2. Clothing + umbrella
     X_cloth = build_clothing_features(w)
 
     clothing_idx   = clothing_rf.predict(X_cloth)[0]
@@ -471,7 +538,7 @@ def predict_all(req: PredictRequest):
     umbrella_flag = bool(umbrella_rf.predict(X_cloth)[0])
     umbrella_conf = float(umbrella_rf.predict_proba(X_cloth)[0][1])
 
-    # 3. Activity suggestions — NEW approach
+    # 3. Activity suggestions
     top3 = predict_top_activities(w, n=3)
 
     activity_suggestions = [
@@ -484,8 +551,11 @@ def predict_all(req: PredictRequest):
         )
         for item in top3
     ]
+
+    # 4. Safety ML insights (6 models: A–F)
     ml_insights = predict_ml_insights(w)
-    # 4. Friendly text
+
+    # 5. Friendly text
     rec_text = build_recommendation_text(
         clothing_label, umbrella_flag,
         w["temperature_c"], w["weather_condition"],
@@ -503,8 +573,7 @@ def predict_all(req: PredictRequest):
         hour_of_day             = w["hour_of_day"],
         season                  = w["season"],
         recommendation_text     = rec_text,
-        mlInsights= ml_insights
-
+        mlInsights              = ml_insights,   # ← properly included
     )
 
 

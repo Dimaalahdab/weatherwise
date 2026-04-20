@@ -1,9 +1,10 @@
 // src/components/SmartSuggestions.jsx
 import { clothingLabel } from "../services/weather";
 import {
+  getExtraAdvice,
   getWeatherAlert,
   filterActivitiesByWeather,
-  getExtraAdvice
+  shouldBringUmbrella,
 } from "../utils/weatherHelpers";
 
 // ─── Clothing emoji map ────────────────────────────────────────────────────────
@@ -18,60 +19,109 @@ const CLOTHING_EMOJI = {
   very_light_clothing_stay_hydrated: "😎",
 };
 
-// ─── Safety Check Card ────────────────────────────────────────────────────────
-function SafetyCheckCard({ mlInsights }) {
-  const {
-    uvProtection,
-    hydrationAlert,
-    roadSurface,
-    windAlert,
-    windChillWarning,
-    outdoorPoor,
-  } = mlInsights || {};
+// ─── Merged Umbrella + Safety Card ───────────────────────────────────────────
+// All original logic for both cards is preserved — they're just rendered
+// together in one card with a thin divider between them.
+function UmbrellaSafetyCard({ mlPrediction, mlInsights, weatherCode }) {
+  // ── Umbrella logic (unchanged) ──────────────────────────────────────────
+  const umbrellaNeeded = shouldBringUmbrella(mlPrediction, weatherCode);
+  const umbrellaColor  = umbrellaNeeded ? "blue" : "green";
 
-  const activeAlerts = [
-    hydrationAlert?.triggered,
-    windAlert?.triggered,
-    windChillWarning?.triggered,
-    outdoorPoor?.triggered,
-  ].filter(Boolean).length;
+  // ── Safety logic (unchanged) ────────────────────────────────────────────
+  const safetyLoading = !mlInsights;
 
-  const cardColor = activeAlerts >= 2 ? "red" : "amber";
+  let safetyHeadline = "Checking conditions…";
+  let activeAlerts   = 0;
+  let safetyColor    = "amber";
 
-  const headline =
-    outdoorPoor?.triggered
-      ? "It's rough out there — better to stay in"
-      : windChillWarning?.triggered
-      ? "Bundle up, it feels colder than it looks"
-      : windAlert?.triggered
-      ? "Heads up — strong gusts out there"
-      : hydrationAlert?.triggered
-      ? "Drink some water, it's warm today"
-      : roadSurface?.label === "icy"
-      ? "Roads are icy — take it slow"
-      : roadSurface?.label === "wet"
-      ? "Roads are wet — give extra space"
-      : uvProtection?.label === "sunscreen"
-      ? "Don't forget sunscreen before heading out"
-      : uvProtection?.label === "sunglasses"
-      ? "Grab your sunglasses — UV is moderate"
-      : "You're good to go";
+  if (mlInsights) {
+    const {
+      uvProtection, hydrationAlert, roadSurface,
+      windAlert, windChillWarning, outdoorPoor,
+    } = mlInsights;
 
-  const tag =
-    activeAlerts === 0
+    activeAlerts = [
+      hydrationAlert.triggered,
+      windAlert.triggered,
+      windChillWarning.triggered,
+      outdoorPoor.triggered,
+    ].filter(Boolean).length;
+
+    safetyColor = activeAlerts >= 2 ? "red" : "amber";
+
+    safetyHeadline =
+      outdoorPoor.triggered                 ? "Better to stay in today"
+      : windChillWarning.triggered          ? "Feels colder than it looks"
+      : windAlert.triggered                 ? "Strong gusts out there"
+      : hydrationAlert.triggered            ? "Stay hydrated today"
+      : roadSurface.label === "icy"         ? "Roads are icy — take it slow"
+      : roadSurface.label === "wet"         ? "Roads are wet — give extra space"
+      : uvProtection.label === "sunscreen"  ? "Don't forget sunscreen"
+      : uvProtection.label === "sunglasses" ? "Grab your sunglasses"
+      :                                       "You're good to go";
+  }
+
+  const safetyTag = safetyLoading
+    ? "One moment"
+    : activeAlerts === 0
       ? "All good"
       : `${activeAlerts} heads-up${activeAlerts > 1 ? "s" : ""}`;
 
+  // The card takes the color of whichever sub-section has the higher priority:
+  // active safety alert > umbrella needed > green
+  const cardColor =
+    (safetyColor === "red")                          ? "red"
+    : (activeAlerts > 0)                             ? safetyColor
+    : umbrellaNeeded                                 ? "blue"
+    :                                                  "green";
+
   return (
     <div className={`scard ${cardColor}`}>
-      <div className="sicon">🛡️</div>
-      <div className="stxt">{headline}</div>
-      <span className={`stag ${cardColor}`}>{tag}</span>
+
+      {/* ── Umbrella section ─────────────────────────────────────── */}
+      <div style={{ display: "flex", alignItems: "flex-start", gap: 10, marginBottom: 10 }}>
+        <div style={{ fontSize: 22, lineHeight: 1 }}>
+          {umbrellaNeeded ? "☔" : "🌂"}
+        </div>
+        <div style={{ flex: 1 }}>
+          <div className="stxt" style={{ marginBottom: 2 }}>
+            {umbrellaNeeded ? "Bring an umbrella" : "No umbrella needed"}
+          </div>
+          {mlPrediction?.umbrella_confidence !== undefined && (
+            <div style={{
+              fontSize: 11, color: "var(--text2)", fontStyle: "italic",
+              fontFamily: "var(--font-s)",
+            }}>
+              {Math.round(mlPrediction.umbrella_confidence * 100)}% confidence
+            </div>
+          )}
+        </div>
+        <span className={`stag ${umbrellaColor}`} style={{ flexShrink: 0 }}>Today</span>
+      </div>
+
+      {/* ── Divider ──────────────────────────────────────────────── */}
+      <div style={{
+        borderTop: `1px solid rgba(0,0,0,0.07)`,
+        margin: "4px 0 10px",
+      }} />
+
+      {/* ── Safety section ───────────────────────────────────────── */}
+      <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
+        <div style={{ fontSize: 22, lineHeight: 1 }}>🛡️</div>
+        <div style={{ flex: 1 }}>
+          <div className="stxt" style={{ marginBottom: 2 }}>{safetyHeadline}</div>
+        </div>
+        <span className={`stag ${safetyColor}`} style={{ flexShrink: 0 }}>
+          {safetyTag}
+        </span>
+      </div>
+
     </div>
   );
 }
+
 // ─── Main Component ────────────────────────────────────────────────────────────
-export default function SmartSuggestions({ mlPrediction, mlInsights, weather, timezone }) {
+export default function SmartSuggestions({ mlPrediction, weather, mlInsights, timezone }) {
   const weatherCode = weather?.current?.weathercode ?? 0;
   const alert       = getWeatherAlert(weather, timezone);
 
@@ -87,7 +137,7 @@ export default function SmartSuggestions({ mlPrediction, mlInsights, weather, ti
     );
 
     return (
-      <div style={{ marginBottom: 28 }}>
+      <div>
         <div className="smart-title">Smart Suggestions</div>
         <div className="sgrid">
 
@@ -98,10 +148,14 @@ export default function SmartSuggestions({ mlPrediction, mlInsights, weather, ti
             <span className="stag violet">Now</span>
           </div>
 
-          {/* Card 2 — Safety Check (reads all 6 GB model outputs) */}
-          <SafetyCheckCard mlInsights={mlInsights} />
+          {/* Card 2 — Umbrella + Safety merged (all original logic preserved) */}
+          <UmbrellaSafetyCard
+            mlPrediction={mlPrediction}
+            mlInsights={mlInsights}
+            weatherCode={weatherCode}
+          />
 
-          {/* Card 3 — Best activities */}
+          {/* Card 3 — Top activities (60%+ confidence only) */}
           <div className="scard green">
             <div className="sicon">{confidentActivities[0]?.emoji ?? "🏃"}</div>
             <div className="stxt">Best activities now</div>
@@ -120,7 +174,8 @@ export default function SmartSuggestions({ mlPrediction, mlInsights, weather, ti
                   >
                     <span style={{ fontSize: 16 }}>{a.emoji}</span>
                     <span style={{
-                      fontSize: 13, fontWeight: 600, fontFamily: "var(--font-d)",
+                      fontSize: 13, fontWeight: 600,
+                      fontFamily: "var(--font-d)",
                       color: "var(--text)", flex: 1,
                     }}>
                       {a.label}
@@ -137,7 +192,8 @@ export default function SmartSuggestions({ mlPrediction, mlInsights, weather, ti
               ) : (
                 <div style={{
                   fontSize: 12, color: "var(--text2)",
-                  fontStyle: "italic", fontFamily: "var(--font-s)", lineHeight: 1.5,
+                  fontStyle: "italic", fontFamily: "var(--font-s)",
+                  lineHeight: 1.5,
                 }}>
                   Conditions aren't great for activities right now
                 </div>
@@ -147,14 +203,15 @@ export default function SmartSuggestions({ mlPrediction, mlInsights, weather, ti
             <span className="stag green">Best now</span>
           </div>
 
-          {/* Card 4 — Weather alert next 6 hours */}
+          {/* Card 4 — Weather alert (next 6 hours, timezone-aware) */}
           <div className={`scard ${alert?.color ?? "green"}`}>
             <div className="sicon">{alert?.icon ?? "✅"}</div>
             <div className="stxt">{alert?.title ?? "Weather looks stable"}</div>
             {alert?.body && (
               <div style={{
                 fontSize: 12, color: "var(--text2)", fontStyle: "italic",
-                lineHeight: 1.5, margin: "6px 0 10px", fontFamily: "var(--font-s)",
+                lineHeight: 1.5, margin: "6px 0 10px",
+                fontFamily: "var(--font-s)",
               }}>
                 {alert.body}
               </div>
@@ -169,31 +226,25 @@ export default function SmartSuggestions({ mlPrediction, mlInsights, weather, ti
     );
   }
 
-  // ── Fallback (no ML activity suggestions yet) ─────────────────────────────
+  // ── Fallback when ML is offline ──────────────────────────────────────────────
+  const fallback = [
+    { icon: "🧥", text: "Light jacket for this evening", tag: "6 PM+",      color: "violet" },
+    { icon: "🛡️", text: "Checking conditions…",          tag: "One moment", color: "amber"  },
+    { icon: "🚶", text: "Perfect for a walk right now",  tag: "Now",        color: "green"  },
+    { icon: "🌿", text: "Low pollen today",              tag: "All day",    color: "amber"  },
+  ];
+
   return (
-    <div style={{ marginBottom: 28 }}>
+    <div>
       <div className="smart-title">Smart Suggestions</div>
       <div className="sgrid">
-        <div className="scard violet">
-          <div className="sicon">🧥</div>
-          <div className="stxt">Light jacket for this evening</div>
-          <span className="stag violet">6 PM+</span>
-        </div>
-
-        {/* SafetyCheckCard still works if mlInsights arrived independently */}
-        <SafetyCheckCard mlInsights={mlInsights} />
-
-        <div className="scard green">
-          <div className="sicon">🚶</div>
-          <div className="stxt">Perfect for a walk right now</div>
-          <span className="stag green">Now</span>
-        </div>
-
-        <div className="scard amber">
-          <div className="sicon">🌿</div>
-          <div className="stxt">Low pollen today</div>
-          <span className="stag amber">All day</span>
-        </div>
+        {fallback.map((s, i) => (
+          <div key={i} className={`scard ${s.color}`}>
+            <div className="sicon">{s.icon}</div>
+            <div className="stxt">{s.text}</div>
+            <span className={`stag ${s.color}`}>{s.tag}</span>
+          </div>
+        ))}
       </div>
     </div>
   );

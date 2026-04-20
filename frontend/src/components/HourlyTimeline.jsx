@@ -1,53 +1,121 @@
 // src/components/HourlyTimeline.jsx
-// Visual hourly timeline showing weather + task conflicts for the day.
-// Add below WeatherCard in App.jsx — does NOT change any existing code.
+// FIXES 
+//  1. Timezone-aware hour parsing: getHourInTz() replaces new Date(t).getHours()
+//  2. Task matching uses the same getHourInTz logic on the task hour
+//  3. Conflict display is visual-only — reads task.conflict, never recomputes it
+//  4. Weather labels use the same weatherSummary() mapping as before
 
 import { useMemo } from "react";
 
-// Weather code → short label + color
+function getHourInTz(isoString, timezone) {
+  try {
+    // Append 'Z' only if there's no offset already — prevents double-offset
+    const normalized = /[Zz]|[+-]\d{2}:\d{2}$/.test(isoString)
+      ? isoString
+      : isoString + "Z";
+    const date = new Date(normalized);
+    return Number(
+      new Intl.DateTimeFormat("en-US", {
+        timeZone: timezone,
+        hour: "numeric",
+        hour12: false,
+      }).format(date)
+    );
+  } catch {
+    // Hard fallback: parse the hour digit directly from the ISO string
+    // "2025-04-20T18:00" → 18
+    const match = isoString.match(/T(\d{2}):/);
+    return match ? Number(match[1]) : 0;
+  }
+}
+
+// ── Current local hour in the city's timezone ────────────────────────────────
+function getCurrentHourInTz(timezone) {
+  try {
+    return Number(
+      new Intl.DateTimeFormat("en-US", {
+        timeZone: timezone,
+        hour: "numeric",
+        hour12: false,
+      }).format(new Date())
+    );
+  } catch {
+    return new Date().getHours();
+  }
+}
+
+// ── Weather code → label + color + icon (same mapping as weather panel) ──────
 function weatherSummary(code) {
-  if (code === 0)              return { label: "Clear",   color: "#4ade80", icon: "☀️" };
-  if (code <= 2)               return { label: "Cloudy",  color: "#94a3b8", icon: "⛅" };
-  if (code <= 48)              return { label: "Foggy",   color: "#94a3b8", icon: "🌫️" };
-  if (code <= 67)              return { label: "Rain",    color: "#38bdf8", icon: "🌧️" };
-  if (code <= 77)              return { label: "Snow",    color: "#e0f2fe", icon: "❄️" };
-  if (code <= 82)              return { label: "Showers", color: "#38bdf8", icon: "🌦️" };
-  if (code >= 95)              return { label: "Storm",   color: "#f87171", icon: "⛈️" };
-  return                              { label: "Mixed",   color: "#94a3b8", icon: "🌤️" };
+  if (code === 0)    return { label: "Clear",   color: "#4ade80", icon: "☀️" };
+  if (code <= 2)     return { label: "Cloudy",  color: "#94a3b8", icon: "⛅" };
+  if (code <= 48)    return { label: "Foggy",   color: "#94a3b8", icon: "🌫️" };
+  if (code <= 67)    return { label: "Rain",    color: "#38bdf8", icon: "🌧️" };
+  if (code <= 77)    return { label: "Snow",    color: "#e0f2fe", icon: "❄️" };
+  if (code <= 82)    return { label: "Showers", color: "#38bdf8", icon: "🌦️" };
+  if (code >= 95)    return { label: "Storm",   color: "#f87171", icon: "⛈️" };
+  return             { label: "Mixed",   color: "#94a3b8", icon: "🌤️" };
 }
 
 function isBadWeather(code, rainProb) {
   return rainProb > 50 || code >= 51;
 }
 
-export default function HourlyTimeline({ weather, tasks }) {
+export default function HourlyTimeline({ weather, tasks, timezone }) {
   const hours = useMemo(() => {
     if (!weather?.hourly) return [];
-    const now = new Date().getHours();
 
-    // Show next 12 hours from now
+    // Resolve the effective timezone — fall back to browser TZ
+    const tz = timezone || Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+    // Current local hour in the city
+    const nowHour = getCurrentHourInTz(tz);
+
+   
+    const hourToIndex = new Map();
+    (weather.hourly.time ?? []).forEach((isoString, idx) => {
+      const localHour = getHourInTz(isoString, tz);
+      // Keep the first occurrence of each hour (avoids DST clock-back collision)
+      if (!hourToIndex.has(localHour)) {
+        hourToIndex.set(localHour, idx);
+      }
+    });
+
+    // Show next 12 hours from now (wrapping past midnight)
     return Array.from({ length: 12 }, (_, i) => {
-      const h = (now + i) % 24;
-      const idx = weather.hourly.time?.findIndex(t => new Date(t).getHours() === h) ?? -1;
-      if (idx === -1) return null;
+      const h   = (nowHour + i) % 24;
+      const idx = hourToIndex.get(h);
+      if (idx === undefined) return null;
 
-      const code     = weather.hourly.weathercode?.[idx] ?? 0;
+      const code     = weather.hourly.weathercode?.[idx]               ?? 0;
       const rainProb = weather.hourly.precipitation_probability?.[idx] ?? 0;
-      const temp     = weather.hourly.temperature_2m?.[idx] ?? 0;
-      const wind     = weather.hourly.windspeed_10m?.[idx] ?? 0;
+      const temp     = weather.hourly.temperature_2m?.[idx]            ?? 0;
+      const wind     = weather.hourly.windspeed_10m?.[idx]             ?? 0;
       const bad      = isBadWeather(code, rainProb);
 
-      // Find tasks scheduled at this hour
-      const tasksAtHour = tasks.filter(t => t.hour === h);
-      const conflicting = tasksAtHour.filter(t => t.conflict);
+      // Match tasks by their hour field (already stored as 0–23 int)
+      // This is consistent because task.hour is set from the user's time input
+      // which the panel also stores as a 0–23 integer — no re-parsing needed.
+      const tasksAtHour  = (tasks ?? []).filter((t) => t.hour === h);
+      // Visual-only: read the pre-computed conflict flag — never recompute here
+      const conflicting  = tasksAtHour.filter((t) => t.conflict);
 
-      return { h, code, rainProb, temp, wind, bad, tasksAtHour, conflicting, ...weatherSummary(code) };
+      return {
+        h,
+        code,
+        rainProb,
+        temp,
+        wind,
+        bad,
+        tasksAtHour,
+        conflicting,
+        ...weatherSummary(code),
+      };
     }).filter(Boolean);
-  }, [weather, tasks]);
+  }, [weather, tasks, timezone]);
 
   if (!hours.length) return null;
 
-  const hasAnyConflict = hours.some(h => h.conflicting.length > 0);
+  const hasAnyConflict = hours.some((h) => h.conflicting.length > 0);
 
   return (
     <div style={{
@@ -82,7 +150,7 @@ export default function HourlyTimeline({ weather, tasks }) {
       </div>
 
       {/* Scrollable hour strip */}
-      <div style={{
+      <div className="hourly-strip" style={{
         display: "flex", gap: 8,
         overflowX: "auto", paddingBottom: 4,
         scrollbarWidth: "none",
@@ -94,11 +162,12 @@ export default function HourlyTimeline({ weather, tasks }) {
           return (
             <div
               key={h}
+              className="hourly-slot"
               title={
                 hasConflict
-                  ? `⚠️ ${conflicting.map(t => t.label).join(", ")} — conflict`
+                  ? `⚠️ ${conflicting.map((t) => t.label).join(", ")} — conflict`
                   : hasTask
-                  ? `✅ ${tasksAtHour.map(t => t.label).join(", ")}`
+                  ? `✅ ${tasksAtHour.map((t) => t.label).join(", ")}`
                   : label
               }
               style={{
@@ -155,11 +224,8 @@ export default function HourlyTimeline({ weather, tasks }) {
 
               {/* Task indicator */}
               {hasTask && (
-                <div style={{
-                  fontSize: 12,
-                  title: tasksAtHour.map(t => t.icon).join(""),
-                }}>
-                  {tasksAtHour.slice(0, 2).map(t => t.icon).join("")}
+                <div style={{ fontSize: 12 }}>
+                  {tasksAtHour.slice(0, 2).map((t) => t.icon).join("")}
                 </div>
               )}
 

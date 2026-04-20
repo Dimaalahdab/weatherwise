@@ -87,17 +87,36 @@ Rules:
 - Give specific time-based advice when possible
 - Never start with "Certainly!" or "Great question!"`;
 
+  // ── FIX: Gemini requires the conversation to start with role "user".
+  // The WeatherChat component prepends a greeting message with role "model"
+  // (the initial "Hey! I can see your tasks..." bubble). Sending that as the
+  // first turn causes Gemini to reject the whole request with a 400 error,
+  // which the catch block surfaces as "Connection error".
+  // Solution: drop any leading model turns before sending to the API.
+  const trimmedHistory = history.filter(
+    (_, i) => i !== 0 || history[0].role === "user"
+  );
+  // If after trimming the first real message is still a model turn
+  // (edge case: history is entirely model messages), find the first user turn.
+  const firstUserIdx = trimmedHistory.findIndex((m) => m.role === "user");
+  const safeHistory = firstUserIdx === -1
+    ? trimmedHistory
+    : trimmedHistory.slice(firstUserIdx);
+
   const res = await fetch(`${GEMINI_URL}?key=${GEMINI_API_KEY}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       system_instruction: { parts: [{ text: system }] },
-      contents: history,
+      contents: safeHistory,
       generationConfig: { maxOutputTokens: 200, temperature: 0.8 },
     }),
   });
 
-  if (!res.ok) throw new Error("Gemini chat error");
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err?.error?.message || "Gemini chat error");
+  }
   const data = await res.json();
   return data.candidates?.[0]?.content?.parts?.[0]?.text ?? "Sorry, I couldn't respond right now.";
 }

@@ -1,4 +1,6 @@
 // src/components/WeatherChat.jsx
+
+
 import { useState, useRef, useEffect } from "react";
 import { chatWithAssistant } from "../services/gemini";
 
@@ -21,7 +23,16 @@ export default function WeatherChat({ tasks, weather }) {
   const bottomRef = useRef(null);
   const textareaRef = useRef(null);
 
+
+  const isMounted = useRef(false);
+
   useEffect(() => {
+    if (!isMounted.current) {
+      // First render — skip scroll, just mark as mounted
+      isMounted.current = true;
+      return;
+    }
+    // Subsequent renders caused by new messages — scroll normally
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, loading]);
 
@@ -104,7 +115,6 @@ export default function WeatherChat({ tasks, weather }) {
         <div ref={bottomRef} />
       </div>
 
-      {/* Quick-prompt chips — hide after first user message */}
       {messages.filter((m) => m.role === "user").length === 0 && (
         <div className="wchat-chips">
           {QUICK_PROMPTS.map((q, i) => (

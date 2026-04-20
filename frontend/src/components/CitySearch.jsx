@@ -3,17 +3,18 @@ import { useState } from "react";
 import { searchCity } from "../services/weather";
 
 export default function CitySearch({ onCityChange, toast }) {
-  const [input, setInput]       = useState("");
+  const [input, setInput]         = useState("");
   const [searching, setSearching] = useState(false);
-  const [error, setError]       = useState("");
+  const [error, setError]         = useState("");
 
   const handleSearch = async () => {
-    if (!input.trim()) return;
+    const trimmed = input.trim(); // ← fix: strip leading/trailing spaces
+    if (!trimmed) return;
     setSearching(true);
     setError("");
     try {
-      const result = await searchCity(input);
-      onCityChange(result);   // { lat, lon, cityName }
+      const result = await searchCity(trimmed); // ← use trimmed, not raw input
+      onCityChange(result);
       setInput("");
     } catch {
       setError("City not found. Try another name.");
