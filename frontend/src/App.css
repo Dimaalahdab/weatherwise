@@ -1194,3 +1194,22 @@ body {
   opacity: 0.35;
   cursor: default;
 }
+/* Glowing red pulse for conflicting tasks */
+@keyframes conflictPulse {
+  0%, 100% {
+    box-shadow: 0 0 0 3px rgba(248, 113, 113, 0.12), 0 2px 12px rgba(248, 113, 113, 0.15);
+  }
+  50% {
+    box-shadow: 0 0 0 6px rgba(248, 113, 113, 0.22), 0 4px 20px rgba(248, 113, 113, 0.25);
+  }
+}
+
+/* Hourly timeline scrollbar hide for webkit */
+.hourly-strip::-webkit-scrollbar {
+  display: none;
+}
+
+/* MLBadge dropdown fadeUp (reuses existing .fu animation) */
+.ml-dropdown {
+  animation: fadeUp 0.18s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
