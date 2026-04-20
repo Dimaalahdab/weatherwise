@@ -94,14 +94,13 @@ Rules:
   // which the catch block surfaces as "Connection error".
   // Solution: drop any leading model turns before sending to the API.
   const trimmedHistory = history.filter(
-    (_, i) => i !== 0 || history[0].role === "user"
+    (_, i) => i !== 0 || history[0].role === "user",
   );
   // If after trimming the first real message is still a model turn
   // (edge case: history is entirely model messages), find the first user turn.
   const firstUserIdx = trimmedHistory.findIndex((m) => m.role === "user");
-  const safeHistory = firstUserIdx === -1
-    ? trimmedHistory
-    : trimmedHistory.slice(firstUserIdx);
+  const safeHistory =
+    firstUserIdx === -1 ? trimmedHistory : trimmedHistory.slice(firstUserIdx);
 
   const res = await fetch(`${GEMINI_URL}?key=${GEMINI_API_KEY}`, {
     method: "POST",
@@ -118,5 +117,8 @@ Rules:
     throw new Error(err?.error?.message || "Gemini chat error");
   }
   const data = await res.json();
-  return data.candidates?.[0]?.content?.parts?.[0]?.text ?? "Sorry, I couldn't respond right now.";
+  return (
+    data.candidates?.[0]?.content?.parts?.[0]?.text ??
+    "Sorry, I couldn't respond right now."
+  );
 }
